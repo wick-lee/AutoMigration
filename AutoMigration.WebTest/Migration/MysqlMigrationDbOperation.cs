@@ -5,45 +5,44 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
+using MySqlConnector;
 using Npgsql;
-using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
-using Wick.AutoMigration.Config;
 using Wick.AutoMigration.Enums;
 using Wick.AutoMigration.Interface;
 using Wick.AutoMigration.Model;
 
 namespace AutoMigration.WebTest.Migration;
 
-public class NpgsqlMigrationDbOperation : IMigrationDbOperation<NpgsqlDbContext>
+public class MysqlMigrationDbOperation : IMigrationDbOperation<MysqlDbContext>
 {
-    private readonly ILogger<NpgsqlMigrationDbOperation> _logger;
+    private readonly ILogger<MysqlMigrationDbOperation> _logger;
 
-    public NpgsqlMigrationDbOperation(ILogger<NpgsqlMigrationDbOperation> logger)
+    public MysqlMigrationDbOperation(ILogger<MysqlMigrationDbOperation> logger)
     {
         _logger = logger;
     }
 
     public IEnumerable<Assembly> CompileSnapshotAssemblies()
     {
-        return new List<Assembly>
+        return new List<Assembly>()
         {
-            typeof(NpgsqlValueGenerationStrategy).Assembly,
-            typeof(NpgsqlIndexBuilderExtensions).Assembly,
-            typeof(TestEntity).Assembly
+            typeof(TestEntity).Assembly,
+            typeof(MySqlMigrationBuilderExtensions).Assembly,
+            typeof(MySqlValueGenerationStrategy).Assembly
         };
     }
 
-    public Task BeforeMigrationOperationAsync(NpgsqlDbContext dbContext, IRelationalModel? model,
+    public Task BeforeMigrationOperationAsync(MysqlDbContext dbContext, IRelationalModel? model,
         MigrationRecordModel? recordModel)
     {
         return Task.CompletedTask;
     }
 
-    public Task<MigrationRecordModel?> GetLastMigrationRecord(NpgsqlDbContext dbContext)
+    public Task<MigrationRecordModel?> GetLastMigrationRecord(MysqlDbContext dbContext)
     {
         var sql =
-            $"select productversion, migrationid, metadata, dbcontextfullname from {RunTimeConfig.NpgsqlConfig.MigrationTableName} where dbcontextfullname = @dbcontextfullname order by runtime desc limit 1;";
-        return GetRecord(dbContext, sql, new NpgsqlParameter("@dbcontextfullname", dbContext.GetType().FullName));
+            $"select productversion, migrationid, metadata, dbcontextfullname from {RunTimeConfig.MysqlConfig.MigrationTableName} where dbcontextfullname = @dbcontextfullname order by runtime desc limit 1;";
+        return GetRecord(dbContext, sql, new MySqlParameter("@dbcontextfullname", dbContext.GetType().FullName));
     }
 
     public Task<string> ReplaceSpecialType(string source)
@@ -51,30 +50,30 @@ public class NpgsqlMigrationDbOperation : IMigrationDbOperation<NpgsqlDbContext>
         return Task.FromResult(source);
     }
 
-    public Func<MigrationOperation, SqlCommandType, bool>? FilterMigrationOperation => null;
+    public Func<MigrationOperation, SqlCommandType, bool>? FilterMigrationOperation { get; } = null;
 
     public Task HandleMigrationCommand(IEnumerable<MigrationCommand> migrationCommands, SqlCommandType commandType)
     {
         return Task.CompletedTask;
     }
 
-    public async Task AddMigrationRecord(NpgsqlDbContext dbContext, MigrationRecordModel recordModel)
+    public async Task AddMigrationRecord(MysqlDbContext dbContext, MigrationRecordModel recordModel)
     {
         var sql =
-            $"insert into {RunTimeConfig.NpgsqlConfig.MigrationTableName} (runtime, metadata, migrationid, productversion, upoperations, downoperations, dbcontextfullname, ingoretables)" +
+            $"insert into {RunTimeConfig.MysqlConfig.MigrationTableName} ( runtime, metadata, migrationid, productversion, upoperations, downoperations, dbcontextfullname, ingoretables)" +
             "values (@runtime, @metadata, @migrationid, @productversion, @upoperations, @downoperations, @dbcontextfullname, @ingoretables);";
 
         var result = await dbContext.Database.ExecuteSqlRawAsync(sql, new List<object>()
         {
-            // new NpgsqlParameter("@id", recordModel.Id),
-            new NpgsqlParameter("@runtime", recordModel.RunTime),
-            new NpgsqlParameter("@metadata", recordModel.Metadata),
-            new NpgsqlParameter("@migrationid", recordModel.MigrationId),
-            new NpgsqlParameter("@productversion", recordModel.ProductVersion),
-            new NpgsqlParameter("@upoperations", recordModel.UpOperations),
-            new NpgsqlParameter("@downoperations", recordModel.DownOperations),
-            new NpgsqlParameter("@dbcontextfullname", recordModel.DbContextFullName),
-            new NpgsqlParameter("@ingoretables",
+            // new MySqlParameter("@id", recordModel.Id),
+            new MySqlParameter("@runtime", recordModel.RunTime),
+            new MySqlParameter("@metadata", recordModel.Metadata),
+            new MySqlParameter("@migrationid", recordModel.MigrationId),
+            new MySqlParameter("@productversion", recordModel.ProductVersion),
+            new MySqlParameter("@upoperations", recordModel.UpOperations),
+            new MySqlParameter("@downoperations", recordModel.DownOperations),
+            new MySqlParameter("@dbcontextfullname", recordModel.DbContextFullName),
+            new MySqlParameter("@ingoretables",
                 string.IsNullOrWhiteSpace(recordModel.IgnoreTables) ? DBNull.Value : recordModel.IgnoreTables)
         });
 
@@ -89,7 +88,7 @@ public class NpgsqlMigrationDbOperation : IMigrationDbOperation<NpgsqlDbContext>
         return null;
     }
 
-    private static async Task<MigrationRecordModel?> GetRecord(NpgsqlDbContext dbContext, string sql,
+    private static async Task<MigrationRecordModel?> GetRecord(MysqlDbContext dbContext, string sql,
         params object[]? sqlObjects)
     {
         await using var command = dbContext.Database.GetDbConnection().CreateCommand();

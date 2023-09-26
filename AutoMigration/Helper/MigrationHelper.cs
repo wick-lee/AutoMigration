@@ -17,7 +17,7 @@ public static class MigrationHelper
 
     private static IEnumerable<Assembly> GetAssemblies()
     {
-        var result = new List<Assembly>()
+        var result = new List<Assembly>
         {
             typeof(DbContext).Assembly,
             typeof(DbContextAttribute).Assembly,
@@ -31,16 +31,10 @@ public static class MigrationHelper
         var doMainAssemblies = AppDomain.CurrentDomain.GetAssemblies();
 
         var runtimeAssembly = doMainAssemblies.SingleOrDefault(a => a.GetName().Name == "System.Runtime");
-        if (runtimeAssembly != null)
-        {
-            result.Add(runtimeAssembly);
-        }
+        if (runtimeAssembly != null) result.Add(runtimeAssembly);
 
         var standardAssembly = doMainAssemblies.SingleOrDefault(a => a.GetName().Name == "netstandard");
-        if (standardAssembly != null)
-        {
-            result.Add(standardAssembly);
-        }
+        if (standardAssembly != null) result.Add(standardAssembly);
 
         return result.Distinct();
     }
@@ -59,10 +53,8 @@ public static class MigrationHelper
         var emitResult = compilation.Emit(memoryStream);
 
         if (!emitResult.Success)
-        {
             throw new MigrationException(
                 $"Compilation efcore model snapshot failed, error message: {string.Join("\r\n", emitResult.Diagnostics.Select(d => d.GetMessage()))}");
-        }
 
         memoryStream.Seek(0, SeekOrigin.Begin);
         var context = new AssemblyLoadContext(null, true);

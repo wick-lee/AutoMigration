@@ -1,10 +1,7 @@
 using AutoMigration.WebTest;
 using AutoMigration.WebTest.Migration;
 using Microsoft.EntityFrameworkCore;
-using Npgsql.EntityFrameworkCore.PostgreSQL.Storage.Internal;
-using Wick.AutoMigration;
 using Wick.AutoMigration.Extensions;
-using Wick.AutoMigration.Interface;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,9 +11,22 @@ builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-var connectionString = builder.Configuration.GetConnectionString("NpgsqlCon");
-builder.Services.AddDbContext<MyDbContext>(options => { options.UseNpgsql(connectionString); });
-builder.Services.AddAutoMigration<MyDbContext>(typeof(NpgsqlMigrationSqlProvider), typeof(NpgsqlMigrationDbOperation));
+builder.Configuration.Bind("NpgsqlAutoMigration", RunTimeConfig.NpgsqlConfig);
+builder.Configuration.Bind("MysqlAutoMigration", RunTimeConfig.MysqlConfig);
+
+var connectionString = builder.Configuration.GetConnectionString("NpgsqlConnection");
+var mysqlConnectionString = builder.Configuration.GetConnectionString("MysqlConnection");
+
+builder.Services.AddDbContext<NpgsqlDbContext>(options => { options.UseNpgsql(connectionString); });
+
+builder.Services.AddDbContext<MysqlDbContext>(options =>
+    options.UseMySql(mysqlConnectionString, new MySqlServerVersion(new Version(8, 0, 27))));
+
+builder.Services.AddAutoMigration<NpgsqlDbContext>(typeof(NpgsqlMigrationSqlProvider),
+    typeof(NpgsqlMigrationDbOperation), builder.Configuration, "NpgsqlAutoMigration");
+
+builder.Services.AddAutoMigration<MysqlDbContext>(typeof(MysqlMigrationSqlProvider), typeof(MysqlMigrationDbOperation),
+    builder.Configuration, "MysqlAutoMigration");
 
 var app = builder.Build();
 

@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.EntityFrameworkCore.Design.Internal;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -9,10 +10,10 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Design;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Wick.AutoMigration.Config;
-using Wick.AutoMigration.DefaultImpl;
 using Wick.AutoMigration.Enums;
 using Wick.AutoMigration.Exceptions;
 using Wick.AutoMigration.Extensions;
@@ -24,25 +25,32 @@ namespace Wick.AutoMigration;
 
 public class AutoMigration<TDbContext> where TDbContext : DbContext
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger _logger;
+    private readonly MigrationConfig _config = new();
     private readonly IEnsureDbOperation? _ensureDbOperation;
+    private readonly ILogger _logger;
+    private readonly IMigrationDbOperation<TDbContext> _migrationDbOperation;// TODO update method -> return bool value better then sql script
     private readonly IMigrationSqlProvider<TDbContext> _migrationSqlProvider;
-    private readonly IMigrationDbOperation<TDbContext> _migrationDbOperation;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly IEnumerable<Assembly>? _upgradeAssemblies;
 
-    private readonly IEnumerable<Assembly> _upgradeIgnoreAssemblies;
+    public AutoMigration(IServiceProvider serviceProvider, IConfiguration? configuration,
+        Func<IEnumerable<Assembly>> upgradeAssemblies) : this(serviceProvider, configuration)
+    {
+        _upgradeAssemblies = upgradeAssemblies.Invoke();
+    }
 
-    public AutoMigration(IServiceProvider serviceProvider)
+    public AutoMigration(IServiceProvider serviceProvider, IConfiguration? configuration = null)
     {
         _serviceProvider = serviceProvider;
         _logger = serviceProvider.GetRequiredService<ILogger<AutoMigration<TDbContext>>>();
         _ensureDbOperation = _serviceProvider.GetService<IEnsureDbOperation>();
         _migrationSqlProvider = _serviceProvider.GetRequiredService<IMigrationSqlProvider<TDbContext>>();
         _migrationDbOperation = _serviceProvider.GetRequiredService<IMigrationDbOperation<TDbContext>>();
+        configuration?.Bind(_config);
     }
 
     /// <summary>
-    /// Ensure db and run upgrade service and migration db.
+    ///     Ensure db and run upgrade service and migration db.
     /// </summary>
     /// <exception cref="MigrationException"></exception>
     public async Task MigrationDbAsync()
@@ -54,24 +62,23 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
 
             var dbEnsured = await EnsureDb(dbContext, _ensureDbOperation);
 
-            if (AutoMigrationConfig.RunUpgradeService)
+            if (_config.RunUpgradeService)
             {
-                await RunUpgradeService(_upgradeIgnoreAssemblies);
+                await RunUpgradeService(_upgradeAssemblies);
             }
 
-            if (dbEnsured && AutoMigrationConfig.StopMigrationAfterEnsureDb)
+            if (dbEnsured && _config.StopMigrationAfterEnsureDb)
             {
                 _logger.LogInformation("Db has been ensure and all table is created, skip migration db");
+                // TODO add current snapshot record for next migration
             }
             else
             {
                 await RunMigration(dbContext);
             }
 
-            if (AutoMigrationConfig.RunUpgradeService)
-            {
-                await RunUpgradeService(_upgradeIgnoreAssemblies, MigrationRuntimeType.AfterMigration);
-            }
+            if (_config.RunUpgradeService)
+                await RunUpgradeService(_upgradeAssemblies, MigrationRuntimeType.AfterMigration);
         }
         catch (Exception ex)
         {
@@ -81,7 +88,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     }
 
     /// <summary>
-    /// Run upgrade services
+    ///     Run upgrade services
     /// </summary>
     /// <param name="assemblies">if assemblies it not null, only upgrade assemblies data upgrade services.</param>
     /// <param name="migrationRuntimeType"></param>
@@ -92,7 +99,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
 
         await dbContext.CreateTableIfNotExistAsync(_migrationSqlProvider.CheckUpgradeHistoryTableExistScript(),
-            _migrationSqlProvider.CreateUpgradeHistoryTableScript(), AutoMigrationConfig.DataUpgradeTableName);
+            _migrationSqlProvider.CreateUpgradeHistoryTableScript(), _config.DataUpgradeTableName);
 
         var updateUpgradeTableSql = _migrationSqlProvider.UpdateUpgradeHistoryTableSql();
         if (!string.IsNullOrWhiteSpace(updateUpgradeTableSql))
@@ -102,10 +109,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
             {
                 var updateRes =
                     await dbContext.ExecutedSqlRawAsync(updateUpgradeTableSql);
-                if (updateRes == 0)
-                {
-                    _logger.LogInformation("Update upgrade history no effect rows return");
-                }
+                if (updateRes == 0) _logger.LogInformation("Update upgrade history no effect rows return");
             }
             catch (Exception e)
             {
@@ -113,9 +117,9 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
             }
         }
 
-        var dataUpgradeServices = (scope.ServiceProvider.GetService<IEnumerable<IDataUpgradeService>>() ??
-                                   Array.Empty<IDataUpgradeService>())
-            .Where(service => assemblies?.Contains(service.GetType().Assembly) == true &&
+        var dataUpgradeServices =
+            (scope.ServiceProvider.GetService<IEnumerable<IDataUpgradeService>>() ?? Array.Empty<IDataUpgradeService>())
+            .Where(service => assemblies?.Contains(service.GetType().Assembly) ??
                               service.MigrationRuntimeType == migrationRuntimeType);
 
         await DoRunUpgradeService(dbContext, dataUpgradeServices);
@@ -138,19 +142,17 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
                 var result =
                     await dbContext.ExecutedSqlRawAsync(_migrationSqlProvider.GetAddUpgradeRecordSql(upgradeService));
                 if (result == 0)
-                {
                     _logger.LogError("Add upgrade service history record {Key} failed", upgradeService.Key);
-                }
             }
             catch (Exception e)
             {
-                _logger.LogWarning("Upgrade service {Key} running failed. Exception: {E}", upgradeService.Key, e);
+                _logger.LogError("Upgrade service {Key} running failed. Exception: {E}", upgradeService.Key, e);
             }
         }
     }
 
     /// <summary>
-    /// Ensure db.
+    ///     Ensure db.
     /// </summary>
     /// <param name="dbContext"></param>
     /// <param name="operation">The operation between ensure db.</param>
@@ -169,19 +171,13 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
                 throw new MigrationException("Db creator is not exist");
             }
 
-            if (operation != null)
-            {
-                await operation.BeforeEnsureAsync(dbContext, connection, dbCreator);
-            }
+            if (operation != null) await operation.BeforeEnsureAsync(dbContext, connection, dbCreator);
 
             result = await dbCreator.EnsureCreatedAsync();
 
             _logger.LogInformation("Ensure db finished. db: {Database}", connection.Database);
 
-            if (operation != null)
-            {
-                await operation.AfterEnsureAsync(dbContext);
-            }
+            if (operation != null) await operation.AfterEnsureAsync(dbContext);
         }
         catch (Exception e)
         {
@@ -192,6 +188,11 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         return result;
     }
 
+    /// <summary>
+    ///     Run migration
+    /// </summary>
+    /// <param name="dbContext"></param>
+    /// <exception cref="MigrationException"></exception>
     public async Task RunMigration(TDbContext dbContext)
     {
         var migrationAssembly = dbContext.GetService<IMigrationsAssembly>();
@@ -242,9 +243,9 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
             throw new MigrationException("Generate migration command failed", e);
         }
 
-        string upSqls = string.Join(AutoMigrationConfig.SqlStatementSeparator,
+        string upSqls = string.Join(_config.SqlStatementSeparator,
                 upMigrationCommands.Select(c => c.CommandText)),
-            downSqls = string.Join(AutoMigrationConfig.SqlStatementSeparator,
+            downSqls = string.Join(_config.SqlStatementSeparator,
                 unDoMigrationCommands.Select(c => c.CommandText));
 
         if (upMigrationCommands.Any())
@@ -268,7 +269,8 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
 
 
         var migrationRecordModel = new MigrationRecordModel(GetCurrentSnapshotModelValue(dbContext, dependencies),
-            migrationId, (string)designTimeModel.Model.FindAnnotation("ProductVersion")?.Value ?? "Unknown version", upSqls,
+            migrationId, (string)designTimeModel.Model.FindAnnotation("ProductVersion")?.Value ?? "Unknown version",
+            upSqls,
             downSqls, dbContext.GetType().FullName ?? "Unknown full name", ignoreTables);
 
         await _migrationDbOperation.AddMigrationRecord(dbContext, migrationRecordModel);
@@ -278,9 +280,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     {
         var assemblies = _migrationDbOperation.CompileSnapshotAssemblies();
         if (assemblies != null && assemblies.Any())
-        {
             return MigrationHelper.DefaultMigrationAssemblies.Concat(assemblies).ToHashSet();
-        }
 
         return MigrationHelper.DefaultMigrationAssemblies.ToHashSet();
     }
@@ -289,6 +289,9 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         IRelationalModel? newModel, MigrationsScaffolderDependencies dependencies, TDbContext dbContext,
         SqlCommandType commandType)
     {
+        if (!dependencies.MigrationsModelDiffer.HasDifferences(oldModel, newModel))
+            return new List<MigrationCommand>();
+
         var migrationOperations = dependencies.MigrationsModelDiffer.GetDifferences(oldModel, newModel)
             .Where(op => FilterMigrationOperation(op, commandType)).ToList();
         var sqlGenerator = dbContext.GetService<IMigrationsSqlGenerator>();
@@ -302,7 +305,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     private async Task UpdateMigrationHistoryTable(TDbContext dbContext)
     {
         await dbContext.CreateTableIfNotExistAsync(_migrationSqlProvider.CheckMigrationHistoryTableExistScript(),
-            _migrationSqlProvider.CreateMigrationHistoryTableScript(), AutoMigrationConfig.MigrationTableName);
+            _migrationSqlProvider.CreateMigrationHistoryTableScript(), _config.MigrationTableName);
         var updateMigrationTableSql = _migrationSqlProvider.UpdateMigrationHistoryTableSql();
         if (!string.IsNullOrWhiteSpace(updateMigrationTableSql))
         {
@@ -311,10 +314,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
             {
                 var updateRes =
                     await dbContext.ExecutedSqlRawAsync(updateMigrationTableSql);
-                if (updateRes == 0)
-                {
-                    _logger.LogInformation("Update migration history no effect rows return");
-                }
+                if (updateRes == 0) _logger.LogInformation("Update migration history no effect rows return");
             }
             catch (Exception e)
             {
@@ -333,16 +333,10 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     private static IModel? GetSnapshotModel(ModelSnapshot? snapshot, TDbContext dbContext,
         MigrationsScaffolderDependencies dependencies)
     {
-        if (snapshot == null)
-        {
-            return null;
-        }
+        if (snapshot == null) return null;
 
         var result = snapshot.Model;
-        if (result is IMutableModel mutableModel)
-        {
-            result = mutableModel.FinalizeModel();
-        }
+        if (result is IMutableModel mutableModel) result = mutableModel.FinalizeModel();
 
         result = dbContext.GetService<IModelRuntimeInitializer>().Initialize(result);
         result = dependencies.SnapshotModelProcessor.Process(result);
@@ -351,10 +345,10 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     }
 
     [SuppressMessage("Usage", "EF1001:Internal EF Core API usage.")]
-    private IServiceProvider BuildScaffolderDependencies(TDbContext dbContext, IMigrationsAssembly migrationsAssembly)
+    private static IServiceProvider BuildScaffolderDependencies(TDbContext dbContext, IMigrationsAssembly migrationsAssembly)
     {
         var builder = new DesignTimeServicesBuilder(migrationsAssembly.Assembly, Assembly.GetEntryAssembly(),
-            new DefaultOperationReporter(_logger), null);
+            new OperationReporter(new OperationReportHandler()), Array.Empty<string>());
         return builder.Build(dbContext);
     }
 
@@ -365,25 +359,20 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         var model = dbContext.GetService<IDesignTimeModel>().Model;
         var codeGenerator = dependencies.MigrationsCodeGeneratorSelector.Select(null);
         return codeGenerator.GenerateSnapshot(MethodBase.GetCurrentMethod()?.ReflectedType?.Namespace,
-            dbContext.GetType(), $"Migration_{migrationId}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}", model);
+            dbContext.GetType(), $"Migration_{migrationId}", model);
     }
 
     private string? RemoveIgnoredTable(IRelationalModel? oldModel, IRelationalModel newModel)
     {
         var ignoreTables = _migrationDbOperation.GetIgnoreTables();
-        if (ignoreTables == null || !ignoreTables.Any())
-        {
-            return null;
-        }
+        if (ignoreTables == null || !ignoreTables.Any()) return null;
 
         var newModelProperties = newModel.GetType().GetProperties();
         foreach (var property in newModelProperties)
         {
             if (property.Name != "Tables" ||
                 property.PropertyType != typeof(SortedDictionary<(string, string), Table>))
-            {
                 continue;
-            }
 
             foreach (var table in ignoreTables)
             {

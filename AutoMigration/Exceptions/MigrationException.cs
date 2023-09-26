@@ -2,7 +2,7 @@
 
 public class MigrationException : Exception
 {
-    public MigrationException() : base()
+    public MigrationException()
     {
     }
 

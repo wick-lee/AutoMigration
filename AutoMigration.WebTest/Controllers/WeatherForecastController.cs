@@ -15,20 +15,23 @@ public class WeatherForecastController : ControllerBase
     };
 
     private readonly ILogger<WeatherForecastController> _logger;
-    private readonly MyDbContext _dbContext;
-    private readonly AutoMigration<MyDbContext> _autoMigration;
+    private readonly NpgsqlDbContext _dbContext;
+    private readonly AutoMigration<NpgsqlDbContext> _autoMigration;
+    private readonly AutoMigration<MysqlDbContext> _mysqlAutoMigration;
 
-    public WeatherForecastController(ILogger<WeatherForecastController> logger, MyDbContext dbContext,
-        AutoMigration<MyDbContext> autoMigration)
+    public WeatherForecastController(ILogger<WeatherForecastController> logger, NpgsqlDbContext dbContext,
+        AutoMigration<NpgsqlDbContext> autoMigration, AutoMigration<MysqlDbContext> mysqlAutoMigration)
     {
         _logger = logger;
         _dbContext = dbContext;
         _autoMigration = autoMigration;
+        _mysqlAutoMigration = mysqlAutoMigration;
     }
 
     [HttpGet(Name = "GetWeatherForecast")]
     public async Task<IEnumerable<WeatherForecast>> Get()
     {
+        await _mysqlAutoMigration.MigrationDbAsync();
         await _autoMigration.MigrationDbAsync();
         return Enumerable.Range(1, 5).Select(index => new WeatherForecast
             {
