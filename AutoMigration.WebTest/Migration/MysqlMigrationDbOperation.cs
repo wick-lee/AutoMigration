@@ -1,6 +1,7 @@
 ﻿using System.Data;
 using System.Reflection;
 using AutoMigration.WebTest.Entities;
+using AutoMigration.WebTest.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -86,6 +87,30 @@ public class MysqlMigrationDbOperation : IMigrationDbOperation<MysqlDbContext>
     public IEnumerable<string>? GetIgnoreTables()
     {
         return null;
+    }
+
+    public Task AddUpgradeRecord(MysqlDbContext dbContext, IDataUpgradeService upgradeService)
+    {
+        var sql =
+            $"INSERT INTO \"{RunTimeConfig.NpgsqlConfig.DataUpgradeTableName}\" (serviceKey, isRepeat, executedTime) VALUES ('{upgradeService.Key}','{upgradeService.IsRepeat}','{DateTimeOffset.UtcNow}');";
+        var result = dbContext.Database.ExecuteSqlRaw(sql);
+        if (result != 1)
+        {
+            _logger.LogWarning("Add upgrade record failed");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> CheckRunUpgradeService(MysqlDbContext dbContext, IDataUpgradeService upgradeService)
+    {
+        if (upgradeService.IsRepeat)
+        {
+            return Task.FromResult(true);
+        }
+
+        return Task.FromResult((long)dbContext.Database.ExecuteScalar(
+            $"SELECT count(1) FROM tableName WHERE \"serviceKey\" = '{upgradeService.Key}'") == 0);
     }
 
     private static async Task<MigrationRecordModel?> GetRecord(MysqlDbContext dbContext, string sql,

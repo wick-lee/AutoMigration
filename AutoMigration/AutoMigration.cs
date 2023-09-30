@@ -16,7 +16,6 @@ using Microsoft.Extensions.Logging;
 using Wick.AutoMigration.Config;
 using Wick.AutoMigration.Enums;
 using Wick.AutoMigration.Exceptions;
-using Wick.AutoMigration.Extensions;
 using Wick.AutoMigration.Helper;
 using Wick.AutoMigration.Interface;
 using Wick.AutoMigration.Model;
@@ -28,8 +27,8 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     private readonly MigrationConfig _config = new();
     private readonly IEnsureDbOperation? _ensureDbOperation;
     private readonly ILogger _logger;
-    private readonly IMigrationDbOperation<TDbContext> _migrationDbOperation;// TODO update method -> return bool value better then sql script
-    private readonly IMigrationSqlProvider<TDbContext> _migrationSqlProvider;
+    private readonly IMigrationDbOperation<TDbContext> _migrationDbOperation;
+    private readonly IMigrationTableCreator<TDbContext> _migrationTableCreator;
     private readonly IServiceProvider _serviceProvider;
     private readonly IEnumerable<Assembly>? _upgradeAssemblies;
 
@@ -44,7 +43,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         _serviceProvider = serviceProvider;
         _logger = serviceProvider.GetRequiredService<ILogger<AutoMigration<TDbContext>>>();
         _ensureDbOperation = _serviceProvider.GetService<IEnsureDbOperation>();
-        _migrationSqlProvider = _serviceProvider.GetRequiredService<IMigrationSqlProvider<TDbContext>>();
+        _migrationTableCreator = _serviceProvider.GetRequiredService<IMigrationTableCreator<TDbContext>>();
         _migrationDbOperation = _serviceProvider.GetRequiredService<IMigrationDbOperation<TDbContext>>();
         configuration?.Bind(_config);
     }
@@ -70,6 +69,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
             if (dbEnsured && _config.StopMigrationAfterEnsureDb)
             {
                 _logger.LogInformation("Db has been ensure and all table is created, skip migration db");
+                await AddDesignTimeSnapshot(dbContext);
                 // TODO add current snapshot record for next migration
             }
             else
@@ -98,24 +98,11 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
 
-        await dbContext.CreateTableIfNotExistAsync(_migrationSqlProvider.CheckUpgradeHistoryTableExistScript(),
-            _migrationSqlProvider.CreateUpgradeHistoryTableScript(), _config.DataUpgradeTableName);
+        _logger.LogInformation("Start create upgrade table if not exist");
+        await _migrationTableCreator.CreateUpgradeTableIfNotExist(dbContext);
 
-        var updateUpgradeTableSql = _migrationSqlProvider.UpdateUpgradeHistoryTableSql();
-        if (!string.IsNullOrWhiteSpace(updateUpgradeTableSql))
-        {
-            _logger.LogInformation("Start update upgrade history table");
-            try
-            {
-                var updateRes =
-                    await dbContext.ExecutedSqlRawAsync(updateUpgradeTableSql);
-                if (updateRes == 0) _logger.LogInformation("Update upgrade history no effect rows return");
-            }
-            catch (Exception e)
-            {
-                _logger.LogWarning("Update upgrade history table failed, ex message {E}", e);
-            }
-        }
+        _logger.LogInformation("Start update upgrade table");
+        await _migrationTableCreator.UpdateUpgradeTable(dbContext);
 
         var dataUpgradeServices =
             (scope.ServiceProvider.GetService<IEnumerable<IDataUpgradeService>>() ?? Array.Empty<IDataUpgradeService>())
@@ -125,24 +112,20 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         await DoRunUpgradeService(dbContext, dataUpgradeServices);
     }
 
-    private async Task DoRunUpgradeService(DbContext dbContext, IEnumerable<IDataUpgradeService> upgradeServices)
+    private async Task DoRunUpgradeService(TDbContext dbContext, IEnumerable<IDataUpgradeService> upgradeServices)
     {
         foreach (var upgradeService in upgradeServices)
         {
-            if (await dbContext.ExecutedSqlRawAsync(
-                    _migrationSqlProvider.CheckUpgradeServiceHasExecutedSql(upgradeService)) != 0)
+            if (!await _migrationDbOperation.CheckRunUpgradeService(dbContext, upgradeService))
             {
-                _logger.LogDebug("Upgrade service {Key} has been executed, skip executed", upgradeService.Key);
+                _logger.LogDebug("Upgrade service {Key} skip executed", upgradeService.Key);
                 continue;
             }
 
             try
             {
                 await upgradeService.OperationAsync();
-                var result =
-                    await dbContext.ExecutedSqlRawAsync(_migrationSqlProvider.GetAddUpgradeRecordSql(upgradeService));
-                if (result == 0)
-                    _logger.LogError("Add upgrade service history record {Key} failed", upgradeService.Key);
+                await _migrationDbOperation.AddUpgradeRecord(dbContext, upgradeService);
             }
             catch (Exception e)
             {
@@ -285,6 +268,40 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         return MigrationHelper.DefaultMigrationAssemblies.ToHashSet();
     }
 
+    private async Task AddDesignTimeSnapshot(TDbContext dbContext)
+    {
+        var migrationAssembly = dbContext.GetService<IMigrationsAssembly>();
+        var designTimeModel = dbContext.GetService<IDesignTimeModel>();
+        var dbService = BuildScaffolderDependencies(dbContext, migrationAssembly);
+        var dependencies = dbService.GetRequiredService<MigrationsScaffolderDependencies>();
+        var migrationId = dependencies.MigrationsIdGenerator.GenerateId(dbContext.GetType().Name);
+        var dRelationalModel = designTimeModel.Model.GetRelationalModel();
+        var ignoreTables = RemoveIgnoredTable(null, dRelationalModel);
+        
+        await UpdateMigrationHistoryTable(dbContext);
+        
+        IEnumerable<MigrationCommand> upMigrationCommands;
+        try
+        {
+            upMigrationCommands = await GetMigrationCommand(null, dRelationalModel, dependencies, dbContext,
+                SqlCommandType.UpSqlCommand);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError("Generate migration command failed");
+            throw new MigrationException("Generate migration command failed", e);
+        }
+
+        var upSqls = string.Join(_config.SqlStatementSeparator,
+            upMigrationCommands.Select(c => c.CommandText));
+
+        var migrationRecordModel = new MigrationRecordModel(GetCurrentSnapshotModelValue(dbContext, dependencies),
+            migrationId, (string)designTimeModel.Model.FindAnnotation("ProductVersion")?.Value ?? "Unknown version",
+            upSqls, string.Empty, dbContext.GetType().FullName ?? "Unknown full name", ignoreTables);
+
+        await _migrationDbOperation.AddMigrationRecord(dbContext, migrationRecordModel);
+    }
+
     private async Task<IEnumerable<MigrationCommand>> GetMigrationCommand(IRelationalModel? oldModel,
         IRelationalModel? newModel, MigrationsScaffolderDependencies dependencies, TDbContext dbContext,
         SqlCommandType commandType)
@@ -304,23 +321,10 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
 
     private async Task UpdateMigrationHistoryTable(TDbContext dbContext)
     {
-        await dbContext.CreateTableIfNotExistAsync(_migrationSqlProvider.CheckMigrationHistoryTableExistScript(),
-            _migrationSqlProvider.CreateMigrationHistoryTableScript(), _config.MigrationTableName);
-        var updateMigrationTableSql = _migrationSqlProvider.UpdateMigrationHistoryTableSql();
-        if (!string.IsNullOrWhiteSpace(updateMigrationTableSql))
-        {
-            _logger.LogInformation("Start update migration history table");
-            try
-            {
-                var updateRes =
-                    await dbContext.ExecutedSqlRawAsync(updateMigrationTableSql);
-                if (updateRes == 0) _logger.LogInformation("Update migration history no effect rows return");
-            }
-            catch (Exception e)
-            {
-                _logger.LogWarning("Update migration history table failed, ex message {E}", e);
-            }
-        }
+        _logger.LogInformation("Start create migration history table if not exist");
+        await _migrationTableCreator.CreateMigrationTableIfNotExist(dbContext);
+        _logger.LogInformation("Start update migration history table");
+        await _migrationTableCreator.UpdateMigrationTable(dbContext);
     }
 
     private bool FilterMigrationOperation(MigrationOperation operation, SqlCommandType commandType)
@@ -345,7 +349,8 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     }
 
     [SuppressMessage("Usage", "EF1001:Internal EF Core API usage.")]
-    private static IServiceProvider BuildScaffolderDependencies(TDbContext dbContext, IMigrationsAssembly migrationsAssembly)
+    private static IServiceProvider BuildScaffolderDependencies(TDbContext dbContext,
+        IMigrationsAssembly migrationsAssembly)
     {
         var builder = new DesignTimeServicesBuilder(migrationsAssembly.Assembly, Assembly.GetEntryAssembly(),
             new OperationReporter(new OperationReportHandler()), Array.Empty<string>());

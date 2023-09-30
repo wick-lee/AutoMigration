@@ -71,4 +71,20 @@ public interface IMigrationDbOperation<in TDbContext> where TDbContext : DbConte
     /// </summary>
     /// <returns></returns>
     public IEnumerable<string>? GetIgnoreTables();
+
+    /// <summary>
+    ///     Add upgrade service record.
+    /// </summary>
+    /// <param name="dbContext"></param>
+    /// <param name="upgradeService"></param>
+    /// <returns></returns>
+    public Task AddUpgradeRecord(TDbContext dbContext, IDataUpgradeService upgradeService);
+
+    /// <summary>
+    ///     Check has upgrade service should run this time.
+    /// </summary>
+    /// <param name="dbContext"></param>
+    /// <param name="upgradeService"></param>
+    /// <returns></returns>
+    public Task<bool> CheckRunUpgradeService(TDbContext dbContext, IDataUpgradeService upgradeService);
 }

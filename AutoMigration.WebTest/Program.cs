@@ -22,10 +22,10 @@ builder.Services.AddDbContext<NpgsqlDbContext>(options => { options.UseNpgsql(co
 builder.Services.AddDbContext<MysqlDbContext>(options =>
     options.UseMySql(mysqlConnectionString, new MySqlServerVersion(new Version(8, 0, 27))));
 
-builder.Services.AddAutoMigration<NpgsqlDbContext>(typeof(NpgsqlMigrationSqlProvider),
+builder.Services.AddAutoMigration<NpgsqlDbContext>(typeof(NpgsqlMigrationTableCreator),
     typeof(NpgsqlMigrationDbOperation), builder.Configuration, "NpgsqlAutoMigration");
 
-builder.Services.AddAutoMigration<MysqlDbContext>(typeof(MysqlMigrationSqlProvider), typeof(MysqlMigrationDbOperation),
+builder.Services.AddAutoMigration<MysqlDbContext>(typeof(MysqlMigrationTableCreator), typeof(MysqlMigrationDbOperation),
     builder.Configuration, "MysqlAutoMigration");
 
 var app = builder.Build();
