@@ -87,7 +87,7 @@ public class NpgsqlMigrationDbOperation : IMigrationDbOperation<NpgsqlDbContext>
 
     public IEnumerable<string>? GetIgnoreTables()
     {
-        return null;
+        return new List<string>() { "test" };
     }
 
     public Task AddUpgradeRecord(NpgsqlDbContext dbContext, IDataUpgradeService upgradeService)

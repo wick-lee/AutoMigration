@@ -70,7 +70,6 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
             {
                 _logger.LogInformation("Db has been ensure and all table is created, skip migration db");
                 await AddDesignTimeSnapshot(dbContext);
-                // TODO add current snapshot record for next migration
             }
             else
             {
@@ -252,9 +251,8 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
 
 
         var migrationRecordModel = new MigrationRecordModel(GetCurrentSnapshotModelValue(dbContext, dependencies),
-            migrationId, (string)designTimeModel.Model.FindAnnotation("ProductVersion")?.Value ?? "Unknown version",
-            upSqls,
-            downSqls, dbContext.GetType().FullName ?? "Unknown full name", ignoreTables);
+            migrationId, GetProductVersion(designTimeModel), upSqls, downSqls,
+            dbContext.GetType().FullName ?? "Unknown full name", ignoreTables);
 
         await _migrationDbOperation.AddMigrationRecord(dbContext, migrationRecordModel);
     }
@@ -277,9 +275,9 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         var migrationId = dependencies.MigrationsIdGenerator.GenerateId(dbContext.GetType().Name);
         var dRelationalModel = designTimeModel.Model.GetRelationalModel();
         var ignoreTables = RemoveIgnoredTable(null, dRelationalModel);
-        
+
         await UpdateMigrationHistoryTable(dbContext);
-        
+
         IEnumerable<MigrationCommand> upMigrationCommands;
         try
         {
@@ -296,8 +294,8 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
             upMigrationCommands.Select(c => c.CommandText));
 
         var migrationRecordModel = new MigrationRecordModel(GetCurrentSnapshotModelValue(dbContext, dependencies),
-            migrationId, (string)designTimeModel.Model.FindAnnotation("ProductVersion")?.Value ?? "Unknown version",
-            upSqls, string.Empty, dbContext.GetType().FullName ?? "Unknown full name", ignoreTables);
+            migrationId, GetProductVersion(designTimeModel), upSqls, string.Empty,
+            dbContext.GetType().FullName ?? "Unknown full name", ignoreTables);
 
         await _migrationDbOperation.AddMigrationRecord(dbContext, migrationRecordModel);
     }
@@ -352,7 +350,8 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     private static IServiceProvider BuildScaffolderDependencies(TDbContext dbContext,
         IMigrationsAssembly migrationsAssembly)
     {
-        var builder = new DesignTimeServicesBuilder(migrationsAssembly.Assembly, Assembly.GetEntryAssembly(),
+        var builder = new DesignTimeServicesBuilder(migrationsAssembly.Assembly,
+            Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly(),
             new OperationReporter(new OperationReportHandler()), Array.Empty<string>());
         return builder.Build(dbContext);
     }
@@ -379,19 +378,27 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
                 property.PropertyType != typeof(SortedDictionary<(string, string), Table>))
                 continue;
 
-            foreach (var table in ignoreTables)
+            foreach (var table in ignoreTables.Where(t => !string.IsNullOrWhiteSpace(t)))
             {
                 if (oldModel != null)
                 {
-                    ((SortedDictionary<(string, string), Table>)property.GetValue(oldModel))?.Remove((table, null));
+                    (property.GetValue(oldModel) as SortedDictionary<(string, string), Table>)?.Remove((table, null));
                 }
 
-                ((SortedDictionary<(string, string), Table>)property.GetValue(newModel))?.Remove((table, null));
+                (property.GetValue(newModel) as SortedDictionary<(string, string), Table>)?.Remove((table, null));
             }
 
             break;
         }
 
         return string.Join(",\r\n", ignoreTables);
+    }
+
+    private static string GetProductVersion(IDesignTimeModel? model)
+    {
+        if (model is null)
+            return "Unknown version";
+
+        return model.Model.FindAnnotation("ProductVersion")?.Value?.ToString() ?? "Unknown version";
     }
 }

@@ -41,6 +41,8 @@ app.UseHttpsRedirection();
 
 app.UseAuthorization();
 
+app.RunAutoMigration<NpgsqlDbContext>();
+
 app.MapControllers();
 
 app.Run();

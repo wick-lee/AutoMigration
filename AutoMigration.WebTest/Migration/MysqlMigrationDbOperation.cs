@@ -86,7 +86,7 @@ public class MysqlMigrationDbOperation : IMigrationDbOperation<MysqlDbContext>
 
     public IEnumerable<string>? GetIgnoreTables()
     {
-        return null;
+        return new List<string>() { "Test" };
     }
 
     public Task AddUpgradeRecord(MysqlDbContext dbContext, IDataUpgradeService upgradeService)

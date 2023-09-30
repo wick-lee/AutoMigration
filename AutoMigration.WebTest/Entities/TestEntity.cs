@@ -11,6 +11,8 @@ public class TestEntity
 
     [Column(TypeName = "jsonb")] public TestEntityProperty Property { get; set; }
 
+    public string TextA { get; set; }
+
     public class TestEntityProperty
     {
         public string Text { get; set; }
