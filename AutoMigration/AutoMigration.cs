@@ -225,9 +225,9 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
             throw new MigrationException("Generate migration command failed", e);
         }
 
-        string upSqls = string.Join(_config.SqlStatementSeparator,
+        string upSql = string.Join(_config.SqlStatementSeparator,
                 upMigrationCommands.Select(c => c.CommandText)),
-            downSqls = string.Join(_config.SqlStatementSeparator,
+            downSql = string.Join(_config.SqlStatementSeparator,
                 unDoMigrationCommands.Select(c => c.CommandText));
 
         if (upMigrationCommands.Any())
@@ -251,7 +251,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
 
 
         var migrationRecordModel = new MigrationRecordModel(GetCurrentSnapshotModelValue(dbContext, dependencies),
-            migrationId, GetProductVersion(designTimeModel), upSqls, downSqls,
+            migrationId, GetProductVersion(designTimeModel), upSql, downSql,
             dbContext.GetType().FullName ?? "Unknown full name", ignoreTables);
 
         await _migrationDbOperation.AddMigrationRecord(dbContext, migrationRecordModel);
@@ -290,11 +290,11 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
             throw new MigrationException("Generate migration command failed", e);
         }
 
-        var upSqls = string.Join(_config.SqlStatementSeparator,
+        var upSql = string.Join(_config.SqlStatementSeparator,
             upMigrationCommands.Select(c => c.CommandText));
 
         var migrationRecordModel = new MigrationRecordModel(GetCurrentSnapshotModelValue(dbContext, dependencies),
-            migrationId, GetProductVersion(designTimeModel), upSqls, string.Empty,
+            migrationId, GetProductVersion(designTimeModel), upSql, string.Empty,
             dbContext.GetType().FullName ?? "Unknown full name", ignoreTables);
 
         await _migrationDbOperation.AddMigrationRecord(dbContext, migrationRecordModel);
