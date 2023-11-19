@@ -35,7 +35,7 @@ public class NpgsqlMigrationDbOperation : IMigrationDbOperation<NpgsqlDbContext>
     }
 
     public Task BeforeMigrationOperationAsync(NpgsqlDbContext dbContext, IRelationalModel? model,
-        MigrationRecordModel? recordModel)
+        MigrationRecordModel? recordModel, CancellationToken token = default)
     {
         return Task.CompletedTask;
     }
@@ -54,7 +54,8 @@ public class NpgsqlMigrationDbOperation : IMigrationDbOperation<NpgsqlDbContext>
 
     public Func<MigrationOperation, SqlCommandType, bool>? FilterMigrationOperation => null;
 
-    public Task HandleMigrationCommand(IEnumerable<MigrationCommand> migrationCommands, SqlCommandType commandType)
+    public Task HandleMigrationCommand(IEnumerable<MigrationCommand> migrationCommands, SqlCommandType commandType,
+        CancellationToken token = default)
     {
         return Task.CompletedTask;
     }

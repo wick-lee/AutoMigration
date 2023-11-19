@@ -34,7 +34,7 @@ public class MysqlMigrationDbOperation : IMigrationDbOperation<MysqlDbContext>
     }
 
     public Task BeforeMigrationOperationAsync(MysqlDbContext dbContext, IRelationalModel? model,
-        MigrationRecordModel? recordModel)
+        MigrationRecordModel? recordModel, CancellationToken token = default)
     {
         return Task.CompletedTask;
     }
@@ -53,7 +53,8 @@ public class MysqlMigrationDbOperation : IMigrationDbOperation<MysqlDbContext>
 
     public Func<MigrationOperation, SqlCommandType, bool>? FilterMigrationOperation { get; } = null;
 
-    public Task HandleMigrationCommand(IEnumerable<MigrationCommand> migrationCommands, SqlCommandType commandType)
+    public Task HandleMigrationCommand(IEnumerable<MigrationCommand> migrationCommands, SqlCommandType commandType,
+        CancellationToken token = default)
     {
         return Task.CompletedTask;
     }

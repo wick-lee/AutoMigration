@@ -32,9 +32,10 @@ public interface IMigrationDbOperation<in TDbContext> where TDbContext : DbConte
     /// <param name="dbContext"></param>
     /// <param name="model"></param>
     /// <param name="recordModel"></param>
+    /// <param name="token"></param>
     /// <returns></returns>
     public Task BeforeMigrationOperationAsync(TDbContext dbContext, IRelationalModel? model,
-        MigrationRecordModel? recordModel);
+        MigrationRecordModel? recordModel, CancellationToken token = default);
 
     /// <summary>
     ///     Get latest migration record.
@@ -55,8 +56,10 @@ public interface IMigrationDbOperation<in TDbContext> where TDbContext : DbConte
     /// </summary>
     /// <param name="migrationCommands"></param>
     /// <param name="commandType"></param>
+    /// <param name="token"></param>
     /// <returns></returns>
-    public Task HandleMigrationCommand(IEnumerable<MigrationCommand> migrationCommands, SqlCommandType commandType);
+    public Task HandleMigrationCommand(IEnumerable<MigrationCommand> migrationCommands, SqlCommandType commandType,
+        CancellationToken token = default);
 
     /// <summary>
     ///     Add migration record after auto migration

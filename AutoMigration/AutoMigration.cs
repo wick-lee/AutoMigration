@@ -52,7 +52,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     ///     Ensure db and run upgrade service and migration db.
     /// </summary>
     /// <exception cref="MigrationException"></exception>
-    public async Task MigrationDbAsync()
+    public async Task MigrationDbAsync(CancellationToken token = default)
     {
         try
         {
@@ -63,21 +63,21 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
 
             if (_config.RunUpgradeService)
             {
-                await RunUpgradeService(_upgradeAssemblies);
+                await RunUpgradeService(_upgradeAssemblies, token: token);
             }
 
             if (dbEnsured && _config.StopMigrationAfterEnsureDb)
             {
                 _logger.LogInformation("Db has been ensure and all table is created, skip migration db");
-                await AddDesignTimeSnapshot(dbContext);
+                await AddDesignTimeSnapshot(dbContext, token);
             }
             else
             {
-                await RunMigration(dbContext);
+                await RunMigration(dbContext, token);
             }
 
             if (_config.RunUpgradeService)
-                await RunUpgradeService(_upgradeAssemblies, MigrationRuntimeType.AfterMigration);
+                await RunUpgradeService(_upgradeAssemblies, MigrationRuntimeType.AfterMigration, token);
         }
         catch (Exception ex)
         {
@@ -91,11 +91,15 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     /// </summary>
     /// <param name="assemblies">if assemblies it not null, only upgrade assemblies data upgrade services.</param>
     /// <param name="migrationRuntimeType"></param>
+    /// <param name="token"></param>
     public async Task RunUpgradeService(IEnumerable<Assembly>? assemblies = null,
-        MigrationRuntimeType migrationRuntimeType = MigrationRuntimeType.BeforeMigration)
+        MigrationRuntimeType migrationRuntimeType = MigrationRuntimeType.BeforeMigration,
+        CancellationToken token = default)
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
+
+        token.ThrowIfCancellationRequested();
 
         _logger.LogInformation("Start create upgrade table if not exist");
         await _migrationTableCreator.CreateUpgradeTableIfNotExist(dbContext);
@@ -108,13 +112,16 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
             .Where(service => assemblies?.Contains(service.GetType().Assembly) ??
                               service.MigrationRuntimeType == migrationRuntimeType);
 
-        await DoRunUpgradeService(dbContext, dataUpgradeServices);
+        await DoRunUpgradeService(dbContext, dataUpgradeServices, token);
     }
 
-    private async Task DoRunUpgradeService(TDbContext dbContext, IEnumerable<IDataUpgradeService> upgradeServices)
+    private async Task DoRunUpgradeService(TDbContext dbContext, IEnumerable<IDataUpgradeService> upgradeServices,
+        CancellationToken token = default)
     {
         foreach (var upgradeService in upgradeServices)
         {
+            token.ThrowIfCancellationRequested();
+
             if (!await _migrationDbOperation.CheckRunUpgradeService(dbContext, upgradeService))
             {
                 _logger.LogDebug("Upgrade service {Key} skip executed", upgradeService.Key);
@@ -174,8 +181,9 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     ///     Run migration
     /// </summary>
     /// <param name="dbContext"></param>
+    /// <param name="token"></param>
     /// <exception cref="MigrationException"></exception>
-    public async Task RunMigration(TDbContext dbContext)
+    public async Task RunMigration(TDbContext dbContext, CancellationToken token = default)
     {
         var migrationAssembly = dbContext.GetService<IMigrationsAssembly>();
         var designTimeModel = dbContext.GetService<IDesignTimeModel>();
@@ -185,6 +193,8 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
 
         var assemblies = GetMigrationAssemblies();
         assemblies.Add(migrationAssembly.Assembly);
+
+        token.ThrowIfCancellationRequested();
 
         await UpdateMigrationHistoryTable(dbContext);
 
@@ -209,15 +219,15 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         IEnumerable<MigrationCommand> upMigrationCommands, unDoMigrationCommands;
         var ignoreTables = RemoveIgnoredTable(oldModel, newModel);
         await _migrationDbOperation.BeforeMigrationOperationAsync(dbContext, snapshotModel?.GetRelationalModel(),
-            lastMigrationRecord);
+            lastMigrationRecord, token);
 
         try
         {
             upMigrationCommands = await GetMigrationCommand(oldModel, newModel, dependencies, dbContext,
-                SqlCommandType.UpSqlCommand);
+                SqlCommandType.UpSqlCommand, token);
 
             unDoMigrationCommands = await GetMigrationCommand(newModel, oldModel, dependencies, dbContext,
-                SqlCommandType.DownSqlCommand);
+                SqlCommandType.DownSqlCommand, token);
         }
         catch (Exception e)
         {
@@ -232,11 +242,13 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
 
         if (upMigrationCommands.Any())
         {
+            token.ThrowIfCancellationRequested();
+
             try
             {
                 var commandExecutor = dbContext.GetService<IMigrationCommandExecutor>();
                 await commandExecutor.ExecuteNonQueryAsync(upMigrationCommands,
-                    dbContext.GetService<IRelationalConnection>());
+                    dbContext.GetService<IRelationalConnection>(), token);
             }
             catch (Exception e)
             {
@@ -266,7 +278,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         return MigrationHelper.DefaultMigrationAssemblies.ToHashSet();
     }
 
-    private async Task AddDesignTimeSnapshot(TDbContext dbContext)
+    private async Task AddDesignTimeSnapshot(TDbContext dbContext, CancellationToken token = default)
     {
         var migrationAssembly = dbContext.GetService<IMigrationsAssembly>();
         var designTimeModel = dbContext.GetService<IDesignTimeModel>();
@@ -276,13 +288,14 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         var dRelationalModel = designTimeModel.Model.GetRelationalModel();
         var ignoreTables = RemoveIgnoredTable(null, dRelationalModel);
 
+        token.ThrowIfCancellationRequested();
         await UpdateMigrationHistoryTable(dbContext);
 
         IEnumerable<MigrationCommand> upMigrationCommands;
         try
         {
             upMigrationCommands = await GetMigrationCommand(null, dRelationalModel, dependencies, dbContext,
-                SqlCommandType.UpSqlCommand);
+                SqlCommandType.UpSqlCommand, token);
         }
         catch (Exception e)
         {
@@ -302,17 +315,19 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
 
     private async Task<IEnumerable<MigrationCommand>> GetMigrationCommand(IRelationalModel? oldModel,
         IRelationalModel? newModel, MigrationsScaffolderDependencies dependencies, TDbContext dbContext,
-        SqlCommandType commandType)
+        SqlCommandType commandType, CancellationToken token = default)
     {
         if (!dependencies.MigrationsModelDiffer.HasDifferences(oldModel, newModel))
             return new List<MigrationCommand>();
+
+        token.ThrowIfCancellationRequested();
 
         var migrationOperations = dependencies.MigrationsModelDiffer.GetDifferences(oldModel, newModel)
             .Where(op => FilterMigrationOperation(op, commandType)).ToList();
         var sqlGenerator = dbContext.GetService<IMigrationsSqlGenerator>();
         var commands = sqlGenerator.Generate(migrationOperations, dbContext.Model);
 
-        await _migrationDbOperation.HandleMigrationCommand(commands, commandType);
+        await _migrationDbOperation.HandleMigrationCommand(commands, commandType, token);
 
         return commands;
     }
