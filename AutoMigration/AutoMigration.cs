@@ -63,21 +63,21 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
 
             if (_config.RunUpgradeService)
             {
-                await RunUpgradeService(_upgradeAssemblies, token: token);
+                await RunUpgradeServiceAsync(_upgradeAssemblies, token: token);
             }
 
             if (dbEnsured && _config.StopMigrationAfterEnsureDb)
             {
                 _logger.LogInformation("Db has been ensure and all table is created, skip migration db");
-                await AddDesignTimeSnapshot(dbContext, token);
+                await AddDesignTimeSnapshotAsync(dbContext, token);
             }
             else
             {
-                await RunMigration(dbContext, token);
+                await RunMigrationAsync(dbContext, token);
             }
 
             if (_config.RunUpgradeService)
-                await RunUpgradeService(_upgradeAssemblies, MigrationRuntimeType.AfterMigration, token);
+                await RunUpgradeServiceAsync(_upgradeAssemblies, MigrationRuntimeType.AfterMigration, token);
         }
         catch (Exception ex)
         {
@@ -92,7 +92,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     /// <param name="assemblies">if assemblies it not null, only upgrade assemblies data upgrade services.</param>
     /// <param name="migrationRuntimeType"></param>
     /// <param name="token"></param>
-    public async Task RunUpgradeService(IEnumerable<Assembly>? assemblies = null,
+    public async Task RunUpgradeServiceAsync(IEnumerable<Assembly>? assemblies = null,
         MigrationRuntimeType migrationRuntimeType = MigrationRuntimeType.BeforeMigration,
         CancellationToken token = default)
     {
@@ -112,10 +112,10 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
             .Where(service => assemblies?.Contains(service.GetType().Assembly) ??
                               service.MigrationRuntimeType == migrationRuntimeType);
 
-        await DoRunUpgradeService(dbContext, dataUpgradeServices, token);
+        await DoRunUpgradeServiceAsync(dbContext, dataUpgradeServices, token);
     }
 
-    private async Task DoRunUpgradeService(TDbContext dbContext, IEnumerable<IDataUpgradeService> upgradeServices,
+    private async Task DoRunUpgradeServiceAsync(TDbContext dbContext, IEnumerable<IDataUpgradeService> upgradeServices,
         CancellationToken token = default)
     {
         foreach (var upgradeService in upgradeServices)
@@ -183,7 +183,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
     /// <param name="dbContext"></param>
     /// <param name="token"></param>
     /// <exception cref="MigrationException"></exception>
-    public async Task RunMigration(TDbContext dbContext, CancellationToken token = default)
+    public async Task RunMigrationAsync(TDbContext dbContext, CancellationToken token = default)
     {
         var migrationAssembly = dbContext.GetService<IMigrationsAssembly>();
         var designTimeModel = dbContext.GetService<IDesignTimeModel>();
@@ -278,7 +278,7 @@ public class AutoMigration<TDbContext> where TDbContext : DbContext
         return MigrationHelper.DefaultMigrationAssemblies.ToHashSet();
     }
 
-    private async Task AddDesignTimeSnapshot(TDbContext dbContext, CancellationToken token = default)
+    private async Task AddDesignTimeSnapshotAsync(TDbContext dbContext, CancellationToken token = default)
     {
         var migrationAssembly = dbContext.GetService<IMigrationsAssembly>();
         var designTimeModel = dbContext.GetService<IDesignTimeModel>();
