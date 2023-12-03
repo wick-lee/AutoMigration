@@ -4,19 +4,23 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <RootNamespace>Wick.AutoMigration</RootNamespace>
-        <PackageVersion>1.0.1</PackageVersion>
+        <PackageVersion>1.0.2</PackageVersion>
         <PackageId>EFCoreAutoMigration</PackageId>
         <Version>1.0.0</Version>
         <Authors>Wick.Li</Authors>
-        <Description>
-            This client library can automatically upgrade the information of tables in the database at project startup or by adding APIs.
+        <Description>This client library can automatically upgrade the information of tables in the database at project startup or by adding APIs.
         </Description>
+        <RepositoryUrl>https://gitee.com/wick-li/auto-migration</RepositoryUrl>
+        <PackageTags>efcore;dotnet;automigration;auto-migration</PackageTags>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
     </PropertyGroup>
+
     <ItemGroup>
-        <FrameworkReference Include="Microsoft.AspNetCore.App" />
-        <PackageReference Include="Microsoft.CodeAnalysis" Version="4.3.1" />
-        <PackageReference Include="Microsoft.EntityFrameworkCore" Version="7.0.10" />
-        <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="7.0.10" />
-        <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="7.0.10" />
+        <FrameworkReference Include="Microsoft.AspNetCore.App"/>
+        <PackageReference Include="Microsoft.CodeAnalysis" Version="4.3.1"/>
+        <PackageReference Include="Microsoft.EntityFrameworkCore" Version="7.0.10"/>
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="7.0.10"/>
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="7.0.10"/>
     </ItemGroup>
+
 </Project>
