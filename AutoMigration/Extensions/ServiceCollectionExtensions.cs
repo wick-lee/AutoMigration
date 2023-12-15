@@ -56,7 +56,8 @@ public static class ServiceCollectionExtensions
     /// <typeparam name="TDbContext"></typeparam>
     /// <returns></returns>
     public static IServiceCollection AddAutoMigration<TDbContext>(this IServiceCollection serviceCollection,
-        Type tableCreator, Type dbOperation, Func<IEnumerable<Assembly>> upgradeAssemblies, IConfiguration configuration,
+        Type tableCreator, Type dbOperation, Func<IEnumerable<Assembly>> upgradeAssemblies,
+        IConfiguration configuration,
         string sectionName = "AutoMigration", params Assembly[] upgradeServiceAssemblies)
         where TDbContext : DbContext
     {
@@ -64,6 +65,30 @@ public static class ServiceCollectionExtensions
                 new AutoMigration<TDbContext>(provider, configuration.GetSection(sectionName), upgradeAssemblies))
             .AddUpgradeService(upgradeServiceAssemblies)
             .AddMigrationRequiredService<TDbContext>(tableCreator, dbOperation);
+    }
+
+    public static IServiceCollection AddAutoMigration<TDbContext, TMigrationTableCreator, TMigrationDbOperation>(
+        this IServiceCollection serviceCollection)
+        where TDbContext : DbContext
+        where TMigrationTableCreator : IMigrationTableCreator<TDbContext>
+        where TMigrationDbOperation : IMigrationDbOperation<TDbContext>
+    {
+        return serviceCollection.AddSingleton<AutoMigration<TDbContext>>()
+            .AddMigrationRequiredService<TDbContext>(typeof(TMigrationTableCreator), typeof(TMigrationDbOperation));
+    }
+
+    public static IServiceCollection AddAutoMigration<TDbContext, TMigrationTableCreator, TMigrationDbOperation>(
+        this IServiceCollection serviceCollection, Func<IEnumerable<Assembly>> upgradeAssemblies,
+        IConfiguration configuration,
+        string sectionName = "AutoMigration", params Assembly[] upgradeServiceAssemblies)
+        where TDbContext : DbContext
+        where TMigrationTableCreator : IMigrationTableCreator<TDbContext>
+        where TMigrationDbOperation : IMigrationDbOperation<TDbContext>
+    {
+        return serviceCollection.AddSingleton<AutoMigration<TDbContext>>(provider =>
+                new AutoMigration<TDbContext>(provider, configuration.GetSection(sectionName), upgradeAssemblies))
+            .AddUpgradeService(upgradeServiceAssemblies)
+            .AddMigrationRequiredService<TDbContext>(typeof(TMigrationTableCreator), typeof(TMigrationDbOperation));
     }
 
     private static IServiceCollection AddMigrationRequiredService<TDbContext>(this IServiceCollection serviceCollection,
